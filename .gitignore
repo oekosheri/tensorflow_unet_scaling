@@ -1,9 +1,11 @@
 .idea
 __pycache__
 .vscode
+*.ipynb
+*.swp
 .ipynb_checkpoints
-*.hdf5
-*.npy
+**/*.hdf5
+**/*.npy
 mito*/*
 models_*/*
-**/logs
+logs/*
