@@ -6,7 +6,7 @@ program2=$localDir/training.py
 setup=$localDir/setup_dist_env.sh
 
 
-epochs=100
+epochs=80
 bs=32
 name="mito"
 
