@@ -118,8 +118,8 @@ def configure_for_performance(ds, batch_size, augmentation=False, options=True):
     #ds = ds.repeat(args.epochs)
 
     # calculate buffer size for shuffle operation
-    bsize = int((9000/hvd.size())+1000)
-    ds = ds.shuffle(buffer_size=bsize, reshuffle_each_iteration=True)
+    #bsize = int((9000/hvd.size())+1000)
+    #ds = ds.shuffle(buffer_size=bsize, reshuffle_each_iteration=True)
 
     ds = ds.batch(batch_size, drop_remainder=True)
 
@@ -133,6 +133,19 @@ def configure_for_performance(ds, batch_size, augmentation=False, options=True):
     ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)
 
     return ds
+
+
+class IOUTestCallback(tf.keras.callbacks.Callback):
+
+    def __init__(self, ds_test):
+        self.ds_test = ds_test
+    
+    def on_epoch_end(self, epoch, logs=None):
+        keys = list(logs.keys())
+        print("End epoch {} of training; got log keys: {}".format(epoch, keys))
+
+        _, iou = test(self.model, self.ds_test)
+        tf.summary.scalar('iou', data=iou, step=epoch)
 
 
 def test(model, ds_test):
@@ -218,7 +231,7 @@ def main(args):
     )
 
     val_ds = configure_for_performance(
-        val_ds, local_batch_size, augmentation=augment, options=False,
+        val_ds, local_batch_size, augmentation=False, options=False,
     )
 
     if hvd.rank() == 0:
@@ -272,9 +285,15 @@ def main(args):
         callbacks.append(early_stopping)
 
     # tensorboard callback to track loss
+    logdir = "logs/"
     logname = args.log_name
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="logs/"+str(logname))
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir+str(logname))
     callbacks.append(tensorboard_callback)
+
+    # custom scalar log for iou
+    file_writer = tf.summary.create_file_writer(logdir+"/metrics")
+    file_writer.set_as_default()
+    callbacks.append(IOUTestCallback(val_ds))
 
     # create learning rate sheduler
     #increment = ((scaled_lr) - scaled_lr) / 10
@@ -333,7 +352,7 @@ def main(args):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Training args")
-    parser.add_argument("--local_batch_size", type=int, help="8 or 16 or 32", default=256)
+    parser.add_argument("--local_batch_size", type=int, help="8 or 16 or 32", default=8)
     # parser.add_argument("--device", type=str, help="cuda" or "cpu", default="cuda")
     parser.add_argument("--lr", type=float, default=0.001, help="ex. 0.001")
     parser.add_argument("--count", type=int, help="for dataset repeat", default=1)
