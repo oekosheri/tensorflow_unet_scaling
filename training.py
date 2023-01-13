@@ -70,7 +70,7 @@ def get_datasets(args, test_size=0.2):
 
     # make tensorflow dataset
     ds = tf.data.Dataset.from_tensor_slices((image_subset, mask_subset))
-    ds = ds.shuffle(len(image_subset), reshuffle_each_iteration=False)
+    ds = ds.shuffle(len(image_subset), reshuffle_each_iteration=True)
     # ds = ds.repeat(count=args.count)
 
     val_size = int(len(image_subset) * test_size)

@@ -11,8 +11,8 @@ bs=16
 name="Indents_"
 
 
-rm -r $localDir/logs
-mkdir $localDir/logs
+rm -r $localDir/Logs
+mkdir $localDir/Logs
 
 for gpu in  1 2 4
 do
