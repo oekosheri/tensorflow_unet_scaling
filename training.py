@@ -54,15 +54,15 @@ def iou_thresh(y_true, y_pred_thresholded):
     return iou_score
 
 
-def get_datasets(args, test_size=0.3):
+def get_datasets(args, test_size=0.2):
 
-    image_names = glob.glob(args.image_dir + "/*.jpeg")
+    image_names = glob.glob(args.image_dir + "/*.png")
     image_names.sort()
     image_subset = image_names[0:]
-    print(len(image_names))
+    # print(len(image_names))
     sys.stdout.flush()
 
-    mask_names = glob.glob(args.mask_dir + "/*.jpeg")
+    mask_names = glob.glob(args.mask_dir + "/*.png")
     mask_names.sort()
     mask_subset = mask_names[0:]
 
@@ -79,7 +79,7 @@ def get_datasets(args, test_size=0.3):
 
     # repeat
     train_ds = train_ds.repeat(count=args.count)
-    val_ds = val_ds.repeat(count=args.count)
+    # val_ds = val_ds.repeat(count=args.count)
 
     return train_ds, val_ds
 
@@ -87,14 +87,14 @@ def get_datasets(args, test_size=0.3):
 def process_tensor(img_path, mask_path):
 
     raw_im = tf.io.read_file(img_path)
-    image = tf.image.decode_jpeg(raw_im, channels=1)
+    image = tf.image.decode_png(raw_im, channels=1)
     input_image = tf.cast(image, tf.float32) / 255.0
-    # input_image = tf.image.resize_with_pad(input_image, 768, 1024, antialias=False)
+    input_image = tf.image.resize_with_pad(input_image, 768, 1024, antialias=False)
 
     raw_ma = tf.io.read_file(mask_path)
     mask = tf.image.decode_jpeg(raw_ma, channels=1)
     input_mask = tf.cast(mask, tf.float32) / 255.0
-    # input_mask = tf.image.resize_with_pad(input_mask, 768, 1024, antialias=False)
+    input_mask = tf.image.resize_with_pad(input_mask, 768, 1024, antialias=False)
     # input_mask = tf.cast(input_mask > 0.2, tf.int8)
 
     return input_image, input_mask
@@ -111,7 +111,7 @@ def augment(image, mask):
 
     # Make sure the image is still in [0, 1]
     image = tf.clip_by_value(image, 0.0, 1.0)
-    mask = tf.clip_by_value(mask, 0.0, 1.0)
+    mask = tf.clip_by_value(mask, 0, 1)
 
     return image, mask
 
@@ -225,12 +225,12 @@ def main(args):
 
     strategy = None
     if args.world_size == 2 and len(l_gpu_devices) > 0:
-        print("single_node")
+        # print("single_node")
 
         # for single host - multi GPU training MirroredStrategy seems to be much faster than MultiWorkerMirroredStrategy
         strategy = tf.distribute.MirroredStrategy()
     elif args.world_size > 2:
-        print("multi-node")
+        # print("multi-node")
         if len(l_gpu_devices) > 0:
 
             # limit to local rank device
@@ -246,7 +246,7 @@ def main(args):
         print(strategy, strategy.num_replicas_in_sync)
 
     # get datasets
-    train_ds, val_ds = get_datasets(args, test_size=0.3)
+    train_ds, val_ds = get_datasets(args, test_size=0.2)
 
     if args.world_rank == 0:
         print("train iterator size:", len(train_ds), len(val_ds))
@@ -268,7 +268,7 @@ def main(args):
         with strategy.scope():
             # model = get_model(args, input_shape)
             # cur_optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(cur_optimizer)
-            model = build_unet((128, 128, 1), 1)
+            model = build_unet((768, 1024, 1), 1)
             model.compile(
                 loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
                 optimizer=Adam(learning_rate=0.001),  # lr_schedule)
@@ -277,7 +277,7 @@ def main(args):
 
     else:
         # cur_optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(cur_optimizer)
-        model = build_unet((128, 128, 1), 1)
+        model = build_unet((768, 1024, 1), 1)
         model.compile(
             loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
             optimizer=Adam(learning_rate=0.001),  # lr_schedule)
@@ -291,18 +291,18 @@ def main(args):
     init_lr = 0.001
     increment = ((init_lr * K) - init_lr) / 10
 
-    # designed for 80 epochs
+    # designed for 150 epochs
     def lr_schedule(epoch, lr):
 
-        if epoch < 60:
+        if epoch < 80:
             return init_lr * K
         # if epoch < 10:
         #     return epoch * increment + init_lr
         # elif epoch >= 10 and epoch < 40:
         #     return init_lr * K
-        elif epoch >= 60 and epoch < 70:
+        elif epoch >= 80 and epoch < 120:
             return init_lr / 2 * K
-        elif epoch >= 70 and epoch <= 80:
+        elif epoch >= 120 and epoch <= 150:
             return init_lr / 4 * K
         # elif epoch >= 45:
         #     return init_lr / 8 * K
@@ -341,11 +341,11 @@ def main(args):
     test(model, val_ds)
     sys.stdout.flush()
 
-    if args.world_rank == 0:
-        print("here")
-        print("Elapsed execution time: " + str(end_time) + " sec")
-        test(model, val_ds)
-        sys.stdout.flush()
+    # if args.world_rank == 0:
+    #     print("here")
+    #     print("Elapsed execution time: " + str(end_time) + " sec")
+    #     test(model, val_ds)
+    #     sys.stdout.flush()
 
     # if strategy:
     #     import atexit
@@ -360,20 +360,20 @@ if __name__ == "__main__":
     parser.add_argument("--global_batch_size", type=int, help="8 or 16 or 32")
     # parser.add_argument("--device", type=str, help="cuda" or "cpu", default="cuda")
     parser.add_argument("--lr", type=float, help="ex. 0.001", default=0.001)
-    parser.add_argument("--count", type=int, help="for dataset repeat", default=1)
+    parser.add_argument("--count", type=int, help="for dataset repeat", default=2)
     parser.add_argument("--epochs", type=int, help="iterations")
 
     parser.add_argument(
         "--image_dir",
         type=str,
         help="directory of images",
-        default=str(os.environ["WORK"]) + "/patches_mito/images_jpg",
+        default=str(os.environ["WORK"]) + "/images_collective",
     )
     parser.add_argument(
         "--mask_dir",
         type=str,
         help="directory of masks",
-        default=str(os.environ["WORK"]) + "/patches_mito/masks_jpg",
+        default=str(os.environ["WORK"]) + "/masks_collective",
     )
 
     parser.add_argument("--augment", type=int, help="0 is False, 1 is True", default=0)
