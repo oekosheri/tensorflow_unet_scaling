@@ -323,6 +323,8 @@ def main(args):
 
     if args.world_rank == 0:
 
+        # model.save(str(os.environ["WORK"]) + "/models_tf/" + str(args.world_size))
+
         df_save["time_per_epoch"] = time_callback.times
         df_save["loss"] = history.history["loss"]
         df_save["val_loss"] = history.history["val_loss"]
