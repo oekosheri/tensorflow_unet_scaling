@@ -1,9 +1,4 @@
-```
-srun -A deepsea -N 1 -p dp-esb -t 01:00:00 --pty --interactive bash
+# pytorch_scaling
+Scaling Tensorflow for Unet
 
-
-ml restore dl2
-
-ml -f unload nvidia-driver/.default
-
-```
+To submit all jobs, edit and run [submission.sh](./submission.sh). For each job a directory is created and its output will be in that directory. In the end log files containing times and losses will be written to a Logs directory.

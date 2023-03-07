@@ -1,19 +1,27 @@
 import os
 import sys
+import math
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from tensorflow.keras.optimizers import Adam
 
+# from tensorflow.keras.callbacks import LearningRateScheduler
 import glob
 import argparse
 import time
 
+
 from models import build_unet
 
-import horovod
-import horovod.tensorflow.keras as hvd
 
-from tensorflow.keras import mixed_precision
+# print("Num GPUs Available: ", len(tf.config.list_physical_devices("GPU")))
+
+
+# device_name = tf.test.gpu_device_name()
+# if device_name != "/device:GPU:0":
+#     raise SystemError("GPU device not found")
+# print("Found GPU at: {}".format(device_name))
 
 
 class TimeHistory(tf.keras.callbacks.Callback):
@@ -46,15 +54,15 @@ def iou_thresh(y_true, y_pred_thresholded):
     return iou_score
 
 
-def get_datasets(args, test_size=0.3):
+def get_datasets(args, test_size=0.2):
 
-    image_names = glob.glob(args.image_dir + "/*.jpeg")
+    image_names = glob.glob(args.image_dir + "/*.png")
     image_names.sort()
     image_subset = image_names[0:]
-    print(len(image_names))
+    # print(len(image_names))
     sys.stdout.flush()
 
-    mask_names = glob.glob(args.mask_dir + "/*.jpeg")
+    mask_names = glob.glob(args.mask_dir + "/*.png")
     mask_names.sort()
     mask_subset = mask_names[0:]
 
@@ -62,7 +70,7 @@ def get_datasets(args, test_size=0.3):
 
     # make tensorflow dataset
     ds = tf.data.Dataset.from_tensor_slices((image_subset, mask_subset))
-    ds = ds.shuffle(len(image_subset), reshuffle_each_iteration=False)
+    ds = ds.shuffle(len(image_subset), reshuffle_each_iteration=True)
     # ds = ds.repeat(count=args.count)
 
     val_size = int(len(image_subset) * test_size)
@@ -71,7 +79,7 @@ def get_datasets(args, test_size=0.3):
 
     # repeat
     train_ds = train_ds.repeat(count=args.count)
-    val_ds = val_ds.repeat(count=args.count)
+    # val_ds = val_ds.repeat(count=args.count)
 
     return train_ds, val_ds
 
@@ -79,14 +87,14 @@ def get_datasets(args, test_size=0.3):
 def process_tensor(img_path, mask_path):
 
     raw_im = tf.io.read_file(img_path)
-    image = tf.image.decode_jpeg(raw_im, channels=1)
+    image = tf.image.decode_png(raw_im, channels=1)
     input_image = tf.cast(image, tf.float32) / 255.0
-    # input_image = tf.image.resize_with_pad(input_image, 768, 1024, antialias=False)
+    input_image = tf.image.resize_with_pad(input_image, 768, 1024, antialias=False)
 
     raw_ma = tf.io.read_file(mask_path)
     mask = tf.image.decode_jpeg(raw_ma, channels=1)
     input_mask = tf.cast(mask, tf.float32) / 255.0
-    # input_mask = tf.image.resize_with_pad(input_mask, 768, 1024, antialias=False)
+    input_mask = tf.image.resize_with_pad(input_mask, 768, 1024, antialias=False)
     # input_mask = tf.cast(input_mask > 0.2, tf.int8)
 
     return input_image, input_mask
@@ -103,49 +111,32 @@ def augment(image, mask):
 
     # Make sure the image is still in [0, 1]
     image = tf.clip_by_value(image, 0.0, 1.0)
-    mask = tf.clip_by_value(mask, 0.0, 1.0)
+    mask = tf.clip_by_value(mask, 0, 1)
 
     return image, mask
 
 
 def configure_for_performance(ds, batch_size, augmentation=False, options=True):
-    
     if options:
-        ds = ds.shard(hvd.size(), hvd.rank())
+        options_shard = tf.data.Options()
+        options_shard.experimental_distribute.auto_shard_policy = (
+            tf.data.experimental.AutoShardPolicy.DATA
+        )
+    else:
+        options_shard = tf.data.Options()
+        options_shard.experimental_distribute.auto_shard_policy = (
+            tf.data.experimental.AutoShardPolicy.OFF
+        )
 
     ds = ds.map(process_tensor, num_parallel_calls=tf.data.AUTOTUNE)
-
-    #ds = ds.repeat(args.epochs)
-
-    # calculate buffer size for shuffle operation
-    #bsize = int((9000/hvd.size())+1000)
-    #ds = ds.shuffle(buffer_size=bsize, reshuffle_each_iteration=True)
-
+    ds = ds.with_options(options_shard)
+    ds = ds.cache()
     ds = ds.batch(batch_size, drop_remainder=True)
-
-    #ds = ds.with_options(options_shard)
-
     if augmentation:
         ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
-
-    ds = ds.cache()
-    
     ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)
 
     return ds
-
-
-class IOUTestCallback(tf.keras.callbacks.Callback):
-
-    def __init__(self, ds_test):
-        self.ds_test = ds_test
-    
-    def on_epoch_end(self, epoch, logs=None):
-        keys = list(logs.keys())
-        print("End epoch {} of training; got log keys: {}".format(epoch, keys))
-
-        _, iou = test(self.model, self.ds_test)
-        tf.summary.scalar('iou', data=iou, step=epoch)
 
 
 def test(model, ds_test):
@@ -154,11 +145,7 @@ def test(model, ds_test):
     true_y = np.concatenate([y for x, y in ds_test], axis=0)
 
     elapsed_eval = time.time()
-    if hvd.rank() == 0:
-        verbose = 1
-    else:
-        verbose = 0
-    y_pred_prob = model.predict(ds_test, verbose)
+    y_pred_prob = model.predict(ds_test, args.verbosity)
     elapsed_eval = time.time() - elapsed_eval
 
     y_pred_thresholded = y_pred_prob > 0.5
@@ -167,49 +154,46 @@ def test(model, ds_test):
     iou = jaccard_coef(true_y, y_pred)
     # iou = iou_thresh(true_y, y_pred_thresholded)
 
-    #print("elapsed test time, IoU ={:.3f}, {}".format(elapsed_eval, iou))
-    #sys.stdout.flush()
+    print("elapsed test time, IoU ={:.3f}, {}".format(elapsed_eval, iou))
+    sys.stdout.flush()
     return elapsed_eval, iou
 
 
 def main(args):
 
-    # set environment variable, prevent tf.data from interfering the threads that launch kernels on the GPU
-    os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
-
-    # enable mixed precision
-    policy = mixed_precision.Policy("mixed_float16")
-    mixed_precision.set_global_policy(policy)
-
-    # tensor float32 hardware support
-    tf.config.experimental.enable_tensor_float_32_execution(True)
-
-    # Horovod: initialize Horovod.
-    hvd.init()
-
-    # Horovod: pin GPU to be used to process local rank (one GPU per process)
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-    if gpus:
-        tf.config.experimental.set_visible_devices(gpus[hvd.local_rank()], 'GPU')
-
     df_save = pd.DataFrame()
-    
-    local_batch_size = args.local_batch_size
-    # for strong scaling
-    #https://developer.hpe.com/blog/scaling-deep-learning-workloads/
-    #local_batch_size = int(global_batch_size / hvd.size())
-    lr = args.lr
+    args.distributed = False
+    args.world_size = 1
+    if "WORLD_SIZE" in os.environ:
+        args.world_size = int(os.environ["WORLD_SIZE"])
+        args.distributed = args.world_size > 1
 
-    # DEBUG CODE, only print on worker 0
-    if hvd.rank() == 0:
-        print("Tensorflow version:", tf.__version__)
-        print("Number of GPUs available:", len(tf.config.experimental.list_physical_devices("GPU")))
-        print("HVD RANKS:",hvd.size())
-        print("LOCAL BATCH SIZE:",local_batch_size)
-        print("GLOBAL BATCH",local_batch_size*hvd.size())
-        print("LR",lr)
+    args.world_rank = args.local_rank = 0
+
+    if args.distributed:
+        args.world_rank = int(os.environ["RANK"])
+        args.local_rank = int(os.environ["LOCAL_RANK"])
+    args.local_batch_size = math.ceil(args.global_batch_size / args.world_size)
+
+    # only use verbose for master process
+    if args.world_rank == 0:
+        args.verbosity = 2
+    else:
+        args.verbosity = 0
+
+    if args.num_intraop_threads:
+        tf.config.threading.set_intra_op_parallelism_threads(args.num_intraop_threads)
+    if args.num_interop_threads:
+        tf.config.threading.set_inter_op_parallelism_threads(args.num_interop_threads)
+
+    if args.world_rank == 0:
+        print(
+            f"Tensorflow get_intra_op_parallelism_threads: {tf.config.threading.get_intra_op_parallelism_threads()}"
+        )
+        print(
+            f"Tensorflow get_inter_op_parallelism_threads: {tf.config.threading.get_inter_op_parallelism_threads()}"
+        )
+        sys.stdout.flush()
 
     # lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
     #     initial_learning_rate=args.lr, decay_steps=10000, decay_rate=0.9)
@@ -219,162 +203,179 @@ def main(args):
     else:
         augment = True
 
+    if args.world_rank == 0:
+        print("Tensorflow Settings:")
+        settings_map = vars(args)
+        for name in sorted(settings_map.keys()):
+            print("--" + str(name) + ": " + str(settings_map[name]))
+        print("")
+        sys.stdout.flush()
+    print(args.world_rank, args.local_rank)
+    sys.stdout.flush()
+
+    # Device configuration
+    args.use_gpu = 1
+    l_gpu_devices = [] if args.use_gpu == 0 else tf.config.list_physical_devices("GPU")
+    if args.world_rank == 0:
+        print("List of GPU devices found:")
+        for dev in l_gpu_devices:
+            print(str(dev.device_type) + ": " + dev.name)
+        print("")
+        sys.stdout.flush()
+
+    strategy = None
+    if args.world_size == 2 and len(l_gpu_devices) > 0:
+        # print("single_node")
+
+        # for single host - multi GPU training MirroredStrategy seems to be much faster than MultiWorkerMirroredStrategy
+        strategy = tf.distribute.MirroredStrategy()
+    elif args.world_size > 2:
+        # print("multi-node")
+        if len(l_gpu_devices) > 0:
+
+            # limit to local rank device
+            tf.config.set_visible_devices(l_gpu_devices[args.local_rank], "GPU")
+            strategy = tf.distribute.MultiWorkerMirroredStrategy(
+                communication_options=tf.distribute.experimental.CommunicationOptions(
+                    implementation=tf.distribute.experimental.CollectiveCommunication.NCCL
+                )
+            )
+        else:
+            strategy = tf.distribute.MultiWorkerMirroredStrategy()
+    if strategy:
+        print(strategy, strategy.num_replicas_in_sync)
+
     # get datasets
-    train_ds, val_ds = get_datasets(args, test_size=0.3)
+    train_ds, val_ds = get_datasets(args, test_size=0.2)
 
-    if hvd.rank() == 0:
-        print("train iterator size:", len(train_ds), len(val_ds))
-        #sys.stdout.flush()
-
-    train_ds = configure_for_performance(
-        train_ds, local_batch_size, augmentation=augment, options=True,
-    )
-
-    val_ds = configure_for_performance(
-        val_ds, local_batch_size, augmentation=False, options=False,
-    )
-
-    if hvd.rank() == 0:
+    if args.world_rank == 0:
         print("train iterator size:", len(train_ds), len(val_ds))
         sys.stdout.flush()
 
-    model = build_unet((128, 128, 1), 1)
-
-    scaled_lr = lr * hvd.size()
-    opt = tf.optimizers.Adam(scaled_lr)
-
-    # Horovod: add Horovod DistributedOptimizer.
-    opt = hvd.DistributedOptimizer(
-        opt, backward_passes_per_step=1, average_aggregated_gradients=True)
-
-    # Horovod: Specify `experimental_run_tf_function=False` to ensure TensorFlow
-    # uses hvd.DistributedOptimizer() to compute gradients.
-    model.compile(loss=tf.keras.losses.BinaryCrossentropy(),
-                        optimizer=opt,
-                        metrics=['accuracy'],
-                        experimental_run_tf_function=False)
-
-    callbacks = [
-        # Horovod: broadcast initial variable states from rank 0 to all other processes.
-        # This is necessary to ensure consistent initialization of all workers when
-        # training is started with random weights or restored from a checkpoint.
-        hvd.callbacks.BroadcastGlobalVariablesCallback(0),
-
-        # Horovod: average metrics among workers at the end of every epoch.
-        #
-        # Note: This callback must be in the list before the ReduceLROnPlateau,
-        # TensorBoard or other metrics-based callbacks.
-        hvd.callbacks.MetricAverageCallback(),
-
-        # Horovod: using `lr = 1.0 * hvd.size()` from the very beginning leads to worse final
-        # accuracy. Scale the learning rate `lr = 1.0` ---> `lr = 1.0 * hvd.size()` during
-        # the first three epochs. See https://arxiv.org/abs/1706.02677 for details.
-        hvd.callbacks.LearningRateWarmupCallback(initial_lr=scaled_lr, warmup_epochs=3, verbose=1),
-    ]
-
-    # Horovod: save checkpoints only on worker 0 to prevent other workers from corrupting them.
-    #if hvd.rank() == 0:
-    #    callbacks.append(tf.keras.callbacks.ModelCheckpoint('checkpoints/checkpoint-{epoch}.h5'))
-
-    # Horovod: write logs on worker 0.
-    verbose = 1 if hvd.rank() == 0 else 0
-
-    # add early stopping callback to save computing resources 
-    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
-    if args.no_early_stop == False:
-        callbacks.append(early_stopping)
-
-    # tensorboard callback to track loss
-    logdir = "logs/"
-    logname = args.log_name
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=logdir+str(logname))
-    callbacks.append(tensorboard_callback)
-
-    # custom scalar log for iou
-    file_writer = tf.summary.create_file_writer(logdir+"/metrics")
-    file_writer.set_as_default()
-    callbacks.append(IOUTestCallback(val_ds))
-
-    # create learning rate sheduler
-    #increment = ((scaled_lr) - scaled_lr) / 10
-    def scheduler(epoch, lr):
-        if epoch < 60:
-            return scaled_lr
-        # if epoch < 10:
-        #     return epoch * increment + scaled_lr
-        # elif epoch >= 10 and epoch < 40:
-        #     return scaled_lr
-        elif epoch >= 60 and epoch < 70:
-            return scaled_lr / 2
-        elif epoch >= 70 and epoch <= 80:
-            return scaled_lr / 4
-        # elif epoch >= 45:
-        #     return scaled_lr / 8
-
-    lr_sheduler_callback = tf.keras.callbacks.LearningRateScheduler(scheduler)
-    callbacks.append(lr_sheduler_callback)
-    
-    #time_callback = TimeHistory()
-    #if hvd.rank() == 0:
-    #    callbacks.append(time_callback)
-    
-    start_time = time.time()
-
-    history = model.fit(
-        train_ds,
-        verbose=verbose,
-        epochs=args.epochs,
-        validation_data=val_ds,
-        callbacks=callbacks
+    train_ds = configure_for_performance(
+        train_ds, args.global_batch_size, augmentation=augment, options=True,
+    )
+    val_ds = configure_for_performance(
+        val_ds, args.global_batch_size, augmentation=augment, options=True,
     )
 
+    if args.world_rank == 0:
+        print("train iterator size:", len(train_ds), len(val_ds))
+        sys.stdout.flush()
+
+    tf.keras.backend.clear_session()
+    if strategy:
+        with strategy.scope():
+            # model = get_model(args, input_shape)
+            # cur_optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(cur_optimizer)
+            model = build_unet((768, 1024, 1), 1)
+            model.compile(
+                loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+                optimizer=Adam(learning_rate=0.001),  # lr_schedule)
+                metrics=["accuracy"],
+            )
+
+    else:
+        # cur_optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(cur_optimizer)
+        model = build_unet((768, 1024, 1), 1)
+        model.compile(
+            loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+            optimizer=Adam(learning_rate=0.001),  # lr_schedule)
+            metrics=["accuracy"],
+        )
+
+    early_stopping = tf.keras.callbacks.EarlyStopping(
+        monitor="val_loss", patience=20, mode="min"
+    )
+    K = args.world_size
+    init_lr = 0.001
+    increment = ((init_lr * K) - init_lr) / 10
+
+    # designed for 150 epochs
+    def lr_schedule(epoch, lr):
+
+        if epoch < 80:
+            return init_lr * K
+        # if epoch < 10:
+        #     return epoch * increment + init_lr
+        # elif epoch >= 10 and epoch < 40:
+        #     return init_lr * K
+        elif epoch >= 80 and epoch < 120:
+            return init_lr / 2 * K
+        elif epoch >= 120 and epoch <= 150:
+            return init_lr / 4 * K
+        # elif epoch >= 45:
+        #     return init_lr / 8 * K
+
+    scheduler = tf.keras.callbacks.LearningRateScheduler(lr_schedule)
+    # csv_logger = CSVLogger("log.csv", append=True, separator=";")
+    time_callback = TimeHistory()
+    start_time = time.time()
+    history = model.fit(
+        train_ds,
+        verbose=args.verbosity,
+        epochs=args.epochs,
+        validation_data=val_ds,
+        callbacks=[time_callback, scheduler],
+        #  CustomLearningRateScheduler(lr_schedule)],
+    )
     end_time = time.time() - start_time
 
-    if hvd.rank() == 0:
+    if args.world_rank == 0:
 
-        #df_save["time_per_epoch"] = time_callback.times
+        # model.save(str(os.environ["WORK"]) + "/models_tf/" + str(args.world_size))
+
+        df_save["time_per_epoch"] = time_callback.times
         df_save["loss"] = history.history["loss"]
         df_save["val_loss"] = history.history["val_loss"]
         df_save["lr"] = history.history["lr"]
-        df_save["training_time"] = end_time*hvd.size()
-        print("Elapsed execution time: " + str(end_time*hvd.size()) + " sec")
+        df_save["training_time"] = end_time
+        print("Elapsed execution time: " + str(end_time) + " sec")
         test_time, iou = test(model, val_ds)
         df_save["test_time"] = test_time
         df_save["iou"] = iou
+        sys.stdout.flush()
 
-        df_save.to_csv("timer/"+str(logname)+".csv", sep=",", float_format="%.6f")
+    df_save.to_csv("./log.csv", sep=",", float_format="%.6f")
 
-    print("Elapsed execution time per rank: " + str(end_time) + " sec")
-    print("Elapsed total execution time: " + str(end_time*hvd.size()) + " sec")
+    print(args.world_rank)
+    print("Elapsed execution time: " + str(end_time) + " sec")
+    test(model, val_ds)
+    sys.stdout.flush()
 
+    # if args.world_rank == 0:
+    #     print("here")
+    #     print("Elapsed execution time: " + str(end_time) + " sec")
+    #     test(model, val_ds)
+    #     sys.stdout.flush()
+
+    # if strategy:
+    #     import atexit
+
+    #     #  # atexit.register(strategy._extended._collective_ops._pool.close)
+    #     atexit.register(strategy._extended._host_cross_device_ops._pool.close)
 
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Training args")
-    parser.add_argument("--local_batch_size", type=int, help="8 or 16 or 32", default=8)
+    parser.add_argument("--global_batch_size", type=int, help="8 or 16 or 32")
     # parser.add_argument("--device", type=str, help="cuda" or "cpu", default="cuda")
-    parser.add_argument("--lr", type=float, default=0.001, help="ex. 0.001")
-    parser.add_argument("--count", type=int, help="for dataset repeat", default=1)
-    parser.add_argument("--epochs", type=int, default=80, help="iterations")
-    parser.add_argument("--log_name", type=str, help="name for the log file")
-    parser.add_argument("--no_early_stop", type=bool, help="enable/disable early stopping", default=False)
+    parser.add_argument("--lr", type=float, help="ex. 0.001", default=0.001)
+    parser.add_argument("--count", type=int, help="for dataset repeat", default=2)
+    parser.add_argument("--epochs", type=int, help="iterations")
 
     parser.add_argument(
         "--image_dir",
         type=str,
         help="directory of images",
-        #DEBUG
-        default="images_jpg",
-        #default=str(os.environ["WORK"]) + "/patches_mito/images_jpg",
+        default=str(os.environ["WORK"]) + "/images_collective",
     )
     parser.add_argument(
         "--mask_dir",
         type=str,
         help="directory of masks",
-        #DEBUG
-        default="masks_jpg",
-        #default=str(os.environ["WORK"]) + "/patches_mito/masks_jpg",
+        default=str(os.environ["WORK"]) + "/masks_collective",
     )
 
     parser.add_argument("--augment", type=int, help="0 is False, 1 is True", default=0)
