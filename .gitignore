@@ -7,3 +7,5 @@ __pycache__
 **/*.npy
 Indents*/*
 models_*/*
+**/horovod-env*/*
+**/env/*
