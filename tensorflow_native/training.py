@@ -1,3 +1,16 @@
+# import os
+# import sys
+# import math
+# import numpy as np
+# import pandas as pd
+# import tensorflow as tf
+# from tensorflow.keras.optimizers import Adam
+
+# # from tensorflow.keras.callbacks import LearningRateScheduler
+# import glob
+# import argparse
+# import time
+
 import os
 import sys
 import math
@@ -6,24 +19,13 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
 from keras.optimizers import Adam
-import horovod.tensorflow.keras as hvd
-
-# from tensorflow.keras.callbacks import LearningRateScheduler
 import glob
 import argparse
 import time
 
-print(keras.__version__)
 from models import build_unet
 
 
-# print("Num GPUs Available: ", len(tf.config.list_physical_devices("GPU")))
-
-
-# device_name = tf.test.gpu_device_name()
-# if device_name != "/device:GPU:0":
-#     raise SystemError("GPU device not found")
-# print("Found GPU at: {}".format(device_name))
 
 
 class TimeHistory(tf.keras.callbacks.Callback):
@@ -72,8 +74,8 @@ def get_datasets(args, test_size=0.2):
 
     # make tensorflow dataset
     ds = tf.data.Dataset.from_tensor_slices((image_subset, mask_subset))
-    ds = ds.shuffle(len(image_subset))#, reshuffle_each_iteration=True)
-
+    ds = ds.shuffle(len(image_subset))
+    # ds = ds.repeat(count=args.count)
 
     val_size = int(len(image_subset) * test_size)
     train_ds = ds.skip(val_size)
@@ -104,6 +106,9 @@ def process_tensor(img_path, mask_path):
 
 def augment(image, mask):
 
+    # deterministic flip
+    # image = tf.image.stateless_random_flip_left_right(image, seed=(1, 2))
+    # mask = tf.image.stateless_random_flip_left_right(mask, seed=(1, 2))
 
     image = tf.image.random_brightness(image, max_delta=40.0 / 255.0)
     image = tf.image.random_contrast(image, 0.2, 1.5)
@@ -115,15 +120,23 @@ def augment(image, mask):
     return image, mask
 
 
-def configure_for_performance(ds, batch_size, shuffle=False, augmentation=False, options=True):
+def configure_for_performance(ds, batch_size, shuffle=False,  augmentation=False, options=True):
+    if options:
+        options_shard = tf.data.Options()
+        options_shard.experimental_distribute.auto_shard_policy = (
+            tf.data.experimental.AutoShardPolicy.DATA
+        )
+    else:
+        options_shard = tf.data.Options()
+        options_shard.experimental_distribute.auto_shard_policy = (
+            tf.data.experimental.AutoShardPolicy.OFF
+        )
 
     ds = ds.map(process_tensor, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.cache()
-    if options:
-        ds = ds.shard(hvd.size(), hvd.rank())
+    ds = ds.with_options(options_shard)
     if shuffle:
         ds = ds.shuffle(len(ds), reshuffle_each_iteration=True)
-
     if augmentation:
         ds = ds.map(augment, num_parallel_calls=tf.data.AUTOTUNE)
     ds = ds.batch(batch_size, drop_remainder=True)
@@ -155,20 +168,22 @@ def test(model, ds_test):
 def main(args):
 
 
-    hvd.init()
-
-    tf.keras.utils.set_random_seed(0)
+    tf.keras.utils.set_random_seed(12)
 
     df_save = pd.DataFrame()
-    args.distributed = hvd.size() > 1
 
-    print("hvd size", hvd.size())
-    sys.stdout.flush()
+    args.world_size = int(os.environ["WORLD_SIZE"])
+    args.distributed = args.world_size > 1
 
-    args.local_batch_size = math.ceil(args.global_batch_size / hvd.size())
+    args.world_rank = args.local_rank = 0
+
+    if args.distributed:
+        args.world_rank = int(os.environ["RANK"])
+        args.local_rank = int(os.environ["LOCAL_RANK"])
+    args.local_batch_size = math.ceil(args.global_batch_size / args.world_size)
 
     # only use verbose for master process
-    if hvd.rank() == 0:
+    if args.world_rank == 0:
         args.verbosity = 2
     else:
         args.verbosity = 0
@@ -179,67 +194,95 @@ def main(args):
     else:
         augment = True
 
-    if hvd.rank() == 0:
+    if args.world_rank == 0:
         print("Tensorflow Settings:")
         settings_map = vars(args)
         for name in sorted(settings_map.keys()):
             print("--" + str(name) + ": " + str(settings_map[name]))
         print("")
         sys.stdout.flush()
-    print(hvd.rank(), hvd.local_rank())
+    print(args.world_rank, args.local_rank)
     sys.stdout.flush()
 
     # Device configuration
-
-    gpus = tf.config.experimental.list_physical_devices("GPU")
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-    if gpus:
-        tf.config.experimental.set_visible_devices(gpus[hvd.local_rank()], 'GPU')
-
-    if hvd.rank() == 0:
+    args.use_gpu = 1
+    l_gpu_devices = [] if args.use_gpu == 0 else tf.config.list_physical_devices("GPU")
+    if args.world_rank == 0:
         print("List of GPU devices found:")
-        for dev in gpus:
+        for dev in l_gpu_devices:
             print(str(dev.device_type) + ": " + dev.name)
         print("")
         sys.stdout.flush()
 
+    strategy = None
+    if args.world_size == 2 and len(l_gpu_devices) > 0:
+        # print("single_node")
+
+        # for single host - multi GPU training MirroredStrategy seems to be much faster than MultiWorkerMirroredStrategy
+        strategy = tf.distribute.MirroredStrategy()
+    elif args.world_size > 2:
+        # print("multi-node")
+        if len(l_gpu_devices) > 0:
+
+            # limit to local rank device
+            tf.config.set_visible_devices(l_gpu_devices[args.local_rank], "GPU")
+            strategy = tf.distribute.MultiWorkerMirroredStrategy(
+                communication_options=tf.distribute.experimental.CommunicationOptions(
+                    implementation=tf.distribute.experimental.CollectiveCommunication.NCCL
+                )
+            )
+        else:
+            strategy = tf.distribute.MultiWorkerMirroredStrategy()
+    if strategy:
+        print(strategy, strategy.num_replicas_in_sync)
 
     # get datasets
     train_ds, val_ds = get_datasets(args, test_size=0.2)
 
-    if hvd.rank() == 0:
+    if args.world_rank == 0:
         print("train iterator size:", len(train_ds), len(val_ds))
         sys.stdout.flush()
 
     train_ds = configure_for_performance(
-        train_ds, args.local_batch_size, shuffle=True, augmentation=augment, options=True,
+        train_ds, args.global_batch_size, augmentation=augment, options=True,
     )
     val_ds = configure_for_performance(
-        val_ds, args.local_batch_size, augmentation=augment, options=True,
+        val_ds, args.global_batch_size, augmentation=augment, options=True,
     )
 
-    if hvd.rank() == 0:
+    if args.world_rank == 0:
         print("train iterator size:", len(train_ds), len(val_ds))
         sys.stdout.flush()
 
-    # tf.keras.backend.clear_session()
+    tf.keras.backend.clear_session()
+    if strategy:
+        with strategy.scope():
+            # model = get_model(args, input_shape)
+            # cur_optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(cur_optimizer)
+            model = build_unet((768, 1024, 1), 1)
+            model.compile(
+                loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+                optimizer=Adam(learning_rate=0.001),  # lr_schedule)
+                metrics=["accuracy"],
+            )
 
-    model = build_unet((768, 1024, 1), 1)
-    optimizer = Adam(learning_rate=0.001)
-    opt = hvd.DistributedOptimizer(optimizer, average_aggregated_gradients=True)
-    model.compile(
-        loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
-        optimizer=opt,  # lr_schedule)
-        metrics=["accuracy"],
-    )
+    else:
+        # cur_optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(cur_optimizer)
+        model = build_unet((768, 1024, 1), 1)
+        model.compile(
+            loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+            optimizer=Adam(learning_rate=0.001),  # lr_schedule)
+            metrics=["accuracy"],
+        )
 
-
-    K = hvd.size()
+    # early_stopping = tf.keras.callbacks.EarlyStopping(
+    #     monitor="val_loss", patience=20, mode="min"
+    # )
+    K = args.world_size
     init_lr = 0.001
     increment = ((init_lr * K) - init_lr) / 10
 
-    # designed for 150 epochs no warm up
+    # designed for 150 epochs
     def lr_schedule(epoch, lr):
 
         if epoch < 80:
@@ -263,19 +306,19 @@ def main(args):
         train_ds,
         verbose=args.verbosity,
         epochs=args.epochs,
-        # validation_data=val_ds,
-        callbacks=[hvd.callbacks.BroadcastGlobalVariablesCallback(0), time_callback, scheduler],
+        validation_data=val_ds,
+        callbacks=[time_callback, scheduler],
         #  CustomLearningRateScheduler(lr_schedule)],
     )
     end_time = time.time() - start_time
 
-    if hvd.rank() == 0:
+    if args.world_rank == 0:
 
         # model.save(str(os.environ["WORK"]) + "/models_tf/" + str(args.world_size))
 
         df_save["time_per_epoch"] = time_callback.times
         df_save["loss"] = history.history["loss"]
-        # df_save["val_loss"] = history.history["val_loss"]
+        df_save["val_loss"] = history.history["val_loss"]
         df_save["lr"] = history.history["lr"]
         df_save["training_time"] = end_time
         print("Elapsed execution time: " + str(end_time) + " sec")
@@ -286,10 +329,11 @@ def main(args):
 
     df_save.to_csv("./log.csv", sep=",", float_format="%.6f")
 
-    print(hvd.rank())
+    print(args.world_rank)
     print("Elapsed execution time: " + str(end_time) + " sec")
-    # test(model, val_ds)
+    test(model, val_ds)
     sys.stdout.flush()
+
 
 
 
@@ -314,23 +358,7 @@ if __name__ == "__main__":
         help="directory of masks",
         default=str(os.environ["WORK"]) + "/masks_collective",
     )
-
     parser.add_argument("--augment", type=int, help="0 is False, 1 is True", default=0)
-
-    parser.add_argument(
-        "--num_interop_threads",
-        required=False,
-        help="Number of interop threads",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
-        "--num_intraop_threads",
-        required=False,
-        help="Number of intra-op threads",
-        type=int,
-        default=0,
-    )
 
     args = parser.parse_args()
 

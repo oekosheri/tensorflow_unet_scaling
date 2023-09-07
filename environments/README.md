@@ -1,4 +1,4 @@
-# Installation Steps for Tensorflow and Horovod
+# Installation Steps for a virtual env for both Tensorflow and Horovod-tensorflow
 
 1. Load the cluster specific environment
 
@@ -11,7 +11,6 @@
 2. Install virtual environment
 
    ```bash
-   # Example: Rocky
-   export TMP_ENV_NAME="horovod-env-rocky"
+
    zsh ./install_venv_tensorflow_horovod.sh
    ```

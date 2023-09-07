@@ -3,50 +3,21 @@
 #SBATCH --partition=c18g
 #SBATCH --nodes=tag_node
 #SBATCH --ntasks-per-node=tag_task
-#SBATCH --cpus-per-task=tag_cpu
+#SBATCH --cpus-per-task=6
 #SBATCH --gres=gpu:tag_task
-#SBATCH --account=rwth1223
+#SBATCH --account=p0020572
 
 localDir=`pwd`
 
-module load cuda/11.2
-module load cudnn/8.2.1
 
+source ../environments/load_env_rocky.sh
+source ../environments/horovod-env/bin/activate
 
-source ~/.zshrc
-conda activate tensor_new
+# mpirun the program
+${MPIEXEC} ${FLAGS_MPI_BATCH} zsh -c 'bash script.sh'
 
-
-module list
-echo "SLURM_JOB_NODELIST: ${SLURM_JOB_NODELIST}"
-echo "R_WLM_ABAQUSHOSTLIST: ${R_WLM_ABAQUSHOSTLIST}"
-echo "SLURMD_NODENAME: ${SLURMD_NODENAME}"
-
-
-
-# commands to run
-comm_1="${MPIEXEC} ${FLAGS_MPI_BATCH} zsh -c '\
-source setup.sh  && bash script.sh'"
-
-comm_2="source setup.sh && bash script.sh"
-
-
-command=tag_command
-
-
-if [ $command = 1 ]
-
-then
-    
-    eval  "${comm_1}"
-    
-else
-    
-    eval  "${comm_2}"
-    
-fi
 
 # save the log file
-cp log.csv  ../Logs/log_${SLURM_NTASKS}.csv
+cp log.csv  ../logs/log_hvd_${SLURM_NTASKS}.csv
 
 

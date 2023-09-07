@@ -1,19 +1,13 @@
 #!/usr/local_rwth/bin/zsh
 
-# create virtual environment based on loaded python version
-python3 -m venv ${TMP_ENV_NAME}
-# activate environment
-source ${TMP_ENV_NAME}/bin/activate
 
-# install pytorch and supporting libraries
-pip install tensorflow==2.7
-pip3 install scikit-learn
-pip3 install pandas
-pip3 install opencv-python
+python3 -m venv horovod-env
+source horovod-env/bin/activate
 
-# build and install horovod (will be linked against loaded MPI version)
-HOROVOD_GPU_OPERATIONS=NCCL     \
-HOROVOD_WITH_MPI=1              \
-HOROVOD_WITH_TENSORFLOW=1    \
-HOROVOD_WITHOUT_PYTORCH=1          \
-pip3 install --no-cache-dir horovod
+pip install tensorflow==2.12.0 --no-cache-dir
+HOROVOD_NCCL_HOME=/cvmfs/software.hpc.rwth.de/Linux/RH8/x86_64/intel/skylake_avx512/software/NCCL/2.11.4-GCCcore-11.3.0-CUDA-11.8.0 \
+HOROVOD_GPU_OPERATIONS=NCCL \
+HOROVOD_WITH_MPI=1 \
+HOROVOD_WITH_TENSORFLOW=1 \
+pip install --no-cache-dir -v horovod
+
