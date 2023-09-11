@@ -23,9 +23,13 @@ import glob
 import argparse
 import time
 
+import inspect
+
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0, parentdir)
+
 from models import build_unet
-
-
 
 
 class TimeHistory(tf.keras.callbacks.Callback):
@@ -306,7 +310,7 @@ def main(args):
         train_ds,
         verbose=args.verbosity,
         epochs=args.epochs,
-        validation_data=val_ds,
+        # validation_data=val_ds,
         callbacks=[time_callback, scheduler],
         #  CustomLearningRateScheduler(lr_schedule)],
     )
@@ -318,7 +322,7 @@ def main(args):
 
         df_save["time_per_epoch"] = time_callback.times
         df_save["loss"] = history.history["loss"]
-        df_save["val_loss"] = history.history["val_loss"]
+        # df_save["val_loss"] = history.history["val_loss"]
         df_save["lr"] = history.history["lr"]
         df_save["training_time"] = end_time
         print("Elapsed execution time: " + str(end_time) + " sec")
