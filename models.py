@@ -1,6 +1,7 @@
 import tensorflow as tf
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import (
+from tensorflow import keras
+from keras.models import Model
+from keras.layers import (
     Input,
     Conv2D,
     MaxPooling2D,
@@ -12,8 +13,8 @@ from tensorflow.keras.layers import (
     Lambda,
 )
 
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.layers import Activation, MaxPool2D, Concatenate
+from keras.optimizers import Adam
+from keras.layers import Activation, MaxPool2D, Concatenate
 
 
 def conv_block(input, num_filters):
