@@ -5,12 +5,12 @@ program=$localDir/training_hvd.py
 
 
 
-epochs=200
+epochs=20
 bs=16
 name="Indents_"
 
 
-for gpu in 1 2 4 6 8 10 12 14
+for gpu in  2
 do
 
     for augment in 0
@@ -29,13 +29,12 @@ do
 
         else
 
-
             tasks=2
             node=$((${gpu}/2))
 
         fi
 
-            # effective batch size
+
         batch=$((${gpu}*bs))
 
         # adapting run file
