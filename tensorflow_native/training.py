@@ -159,7 +159,7 @@ def test(model, ds_test):
 def main(args):
 
 
-    tf.keras.utils.set_random_seed(2346)
+    tf.keras.utils.set_random_seed(1244)
 
 
     args.world_size = int(os.environ["WORLD_SIZE"])

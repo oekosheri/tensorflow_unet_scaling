@@ -6,7 +6,7 @@ program2=$localDir/training.py
 setup=$localDir/setup_dist_env.sh
 
 
-epochs=50
+epochs=200
 bs=16
 name="Indents_"
 
@@ -14,7 +14,7 @@ name="Indents_"
 # rm -r $localDir/Logs
 # mkdir $localDir/Logs
 
-for gpu in 14
+for gpu in 6
 do
 
         for augment in 0

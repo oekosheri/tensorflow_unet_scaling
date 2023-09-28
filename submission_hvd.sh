@@ -5,12 +5,12 @@ program=$localDir/training_hvd.py
 
 
 
-epochs=20
+epochs=200
 bs=16
 name="Indents_"
 
 
-for gpu in  2
+for gpu in  4
 do
 
     for augment in 0

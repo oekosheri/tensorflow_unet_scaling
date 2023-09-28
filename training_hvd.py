@@ -150,7 +150,7 @@ def main(args):
 
     hvd.init()
 
-    tf.keras.utils.set_random_seed(1012)
+    tf.keras.utils.set_random_seed(1244)
 
 
     args.distributed = hvd.size() > 1
