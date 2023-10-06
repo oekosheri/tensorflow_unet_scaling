@@ -41,4 +41,4 @@ This [notebook](./notebooks/Loss_curves.ipynb) has been used for post processing
 
 In the figure below we compare the GPU parallelisation of Unet for Tensorflow native and Tensorflow Horovod. For Tensorflow native the speed-up deviates rather quickly from the ideal speed-up and also the model metric (Here IOU) deteriorates at higher GPU numbers. Tensorflow Horovod seems to outperform native Tensorflow. We have repeated these calculation with different seeds and the behaviours observed here seem to be consistent.
 
-<img src="./image.png" width="100%" height="100%">
+<img src="./image.png" width="99%" height="99%">
