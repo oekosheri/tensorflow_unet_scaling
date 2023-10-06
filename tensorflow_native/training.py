@@ -1,16 +1,3 @@
-# import os
-# import sys
-# import math
-# import numpy as np
-# import pandas as pd
-# import tensorflow as tf
-# from tensorflow.keras.optimizers import Adam
-
-# # from tensorflow.keras.callbacks import LearningRateScheduler
-# import glob
-# import argparse
-# import time
-
 import os
 import sys
 import math
@@ -151,6 +138,7 @@ def configure_for_performance(ds, batch_size, shuffle=False,  augmentation=False
 
 def test(model, ds_test):
 
+
     # true y from validation dataset
     true_y = np.concatenate([y for x, y in ds_test], axis=0)
 
@@ -163,18 +151,16 @@ def test(model, ds_test):
     # print("True, Preds:", set(true_y), set(y_pred))
     iou = jaccard_coef(true_y, y_pred)
     # iou = iou_thresh(true_y, y_pred_thresholded)
-
-    print("elapsed test time, IoU ={:.3f}, {}".format(elapsed_eval, iou))
-    sys.stdout.flush()
     return elapsed_eval, iou
+    # if args.world_rank==0:
+    #     return elapsed_eval, iou
 
 
 def main(args):
 
 
-    tf.keras.utils.set_random_seed(12)
+    tf.keras.utils.set_random_seed(1244)
 
-    df_save = pd.DataFrame()
 
     args.world_size = int(os.environ["WORLD_SIZE"])
     args.distributed = args.world_size > 1
@@ -316,27 +302,38 @@ def main(args):
     )
     end_time = time.time() - start_time
 
+
+
+    # try:
+    #     test_time, iou = test(model, val_ds)
+    #     print(test_time, iou)
+    #     sys.stdout.flush()
+    # except TypeError:
+    #     print("Error")
+    print(args.world_rank)
+    test_time, iou = test(model, val_ds)
+    print(test_time, iou)
+    sys.stdout.flush()
+    df_save = pd.DataFrame()
     if args.world_rank == 0:
 
-        # model.save(str(os.environ["WORK"]) + "/models_tf/" + str(args.world_size))
-
+        # test_time, iou = test(model, val_ds)
         df_save["time_per_epoch"] = time_callback.times
         df_save["loss"] = history.history["loss"]
-        # df_save["val_loss"] = history.history["val_loss"]
         df_save["lr"] = history.history["lr"]
         df_save["training_time"] = end_time
         print("Elapsed execution time: " + str(end_time) + " sec")
-        test_time, iou = test(model, val_ds)
+        df_save["training_time"] = end_time
+        # test_time, iou = test(model, val_ds)
         df_save["test_time"] = test_time
         df_save["iou"] = iou
         sys.stdout.flush()
 
     df_save.to_csv("./log.csv", sep=",", float_format="%.6f")
 
-    print(args.world_rank)
-    print("Elapsed execution time: " + str(end_time) + " sec")
-    test(model, val_ds)
-    sys.stdout.flush()
+
+    # df_save.to_csv("./log.csv", sep=",", float_format="%.6f")
+
 
 
 

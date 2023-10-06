@@ -3,7 +3,7 @@
 #SBATCH --partition=c18g
 #SBATCH --nodes=tag_node
 #SBATCH --ntasks-per-node=tag_task
-#SBATCH --cpus-per-task=6
+#SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:tag_task
 #SBATCH --account=p0020572
 
@@ -38,5 +38,5 @@ fi
 
 # save the log file
 cp log.csv  ../../logs/log_${SLURM_NTASKS}.csv
-
+rm core.*
 

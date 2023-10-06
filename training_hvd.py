@@ -127,7 +127,6 @@ def test(model, ds_test):
 
     # true y from validation dataset
     true_y = np.concatenate([y for x, y in ds_test], axis=0)
-
     elapsed_eval = time.time()
     y_pred_prob = model.predict(ds_test, args.verbosity)
     elapsed_eval = time.time() - elapsed_eval
@@ -137,10 +136,13 @@ def test(model, ds_test):
     # print("True, Preds:", set(true_y), set(y_pred))
     iou = jaccard_coef(true_y, y_pred)
     # iou = iou_thresh(true_y, y_pred_thresholded)
-
-    print("elapsed test time, IoU ={:.3f}, {}".format(elapsed_eval, iou))
-    sys.stdout.flush()
     return elapsed_eval, iou
+
+    # print(hvd.rank())
+    # print("elapsed test time, IoU ={:.3f}, {}".format(elapsed_eval, iou))
+    # sys.stdout.flush()
+    # if hvd.rank() == 0:
+    #     return elapsed_eval, iou
 
 
 def main(args):
@@ -148,9 +150,9 @@ def main(args):
 
     hvd.init()
 
-    tf.keras.utils.set_random_seed(0)
+    tf.keras.utils.set_random_seed(1244)
 
-    df_save = pd.DataFrame()
+
     args.distributed = hvd.size() > 1
 
     print("hvd size", hvd.size())
@@ -207,7 +209,7 @@ def main(args):
         train_ds, args.local_batch_size, shuffle=True, augmentation=augment, options=True,
     )
     val_ds = configure_for_performance(
-        val_ds, args.local_batch_size, augmentation=augment, options=True,
+        val_ds, args.local_batch_size, augmentation=False, options=True,
     )
 
     if hvd.rank() == 0:
@@ -260,27 +262,33 @@ def main(args):
     )
     end_time = time.time() - start_time
 
-    if hvd.rank() == 0:
+    df_save = pd.DataFrame()
+    # try:
+    #     test_time, iou = test(model, val_ds)
 
-        # model.save(str(os.environ["WORK"]) + "/models_tf/" + str(args.world_size))
+    #     print(test_time, iou)
+    #     sys.stdout.flush()
+    # except TypeError:
+    #     print("Error")
+    print(hvd.rank())
+    test_time, iou = test(model, val_ds)
+    print(test_time, iou)
+    sys.stdout.flush()
+    if hvd.rank() == 0:
 
         df_save["time_per_epoch"] = time_callback.times
         df_save["loss"] = history.history["loss"]
-        # df_save["val_loss"] = history.history["val_loss"]
         df_save["lr"] = history.history["lr"]
         df_save["training_time"] = end_time
-        print("Elapsed execution time: " + str(end_time) + " sec")
-        test_time, iou = test(model, val_ds)
+        # test_time, iou = test(model, val_ds)
         df_save["test_time"] = test_time
         df_save["iou"] = iou
+        print("Elapsed execution time: " + str(end_time) + " sec")
         sys.stdout.flush()
 
     df_save.to_csv("./log.csv", sep=",", float_format="%.6f")
 
-    print(hvd.rank())
-    print("Elapsed execution time: " + str(end_time) + " sec")
-    # test(model, val_ds)
-    sys.stdout.flush()
+
 
 
 
@@ -308,20 +316,6 @@ if __name__ == "__main__":
 
     parser.add_argument("--augment", type=int, help="0 is False, 1 is True", default=0)
 
-    parser.add_argument(
-        "--num_interop_threads",
-        required=False,
-        help="Number of interop threads",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
-        "--num_intraop_threads",
-        required=False,
-        help="Number of intra-op threads",
-        type=int,
-        default=0,
-    )
 
     args = parser.parse_args()
 
