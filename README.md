@@ -4,4 +4,4 @@ On the root directory you will find the scripts to run UNet implemented in Tenso
 
 ### Virtual environment:
 
-To install Horovod for Tensorflow a virtual environment was created. The same environment will be used for both Tensorflow native and Horovod trainings so that the results are comparable. Read this README to see which softwares and environments need to be loaded before creating the vitual envs and running the jobs. For both native and Horovod we use NCCL as the backend for collective communications. We also use open MPI for spawning the processes. 
+To install Horovod for Tensorflow a virtual environment was created. The same environment will be used for both Tensorflow native and Horovod trainings so that the results are comparable. Read this [README](./environments/README.md) to see which softwares and environments need to be loaded before creating the vitual envs and running the jobs. For both native and Horovod we use NCCL as the backend for collective communications. We also use open MPI for spawning the parallel processes. 
