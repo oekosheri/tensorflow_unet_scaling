@@ -29,6 +29,8 @@ Training:
 
 ### Submission
 
-- The submission.sh/submission_hvd.sh files submits all jobs in a loop. For our data 14 GPUs was the maximum number of GPUs which for our computing cluster correlates with 7 nodes. The submission file adapts the run_file.sh (Contatining the python script and its input arguments) and submit_file.sh (containing the submission script) for each job. 
-- Jobs run on one node, should be submitted without an MPI run. When more than one node, parallel MPI jobs are spawned by the env variable $MPIEXE in submit_file.
+- The submission.sh/submission_hvd.sh files submit all jobs in a loop. For our data 14 GPUs was the maximum number of GPUs which for our computing cluster correlates with 7 nodes. The submission file adapts the run_file.sh (Contatining the python script and its input arguments) and submit_file.sh (containing the submission script) for each job.
+  
+- Jobs run on one node, should be submitted without an MPI run. With more than one node, parallel MPI jobs are spawned by the env variable $MPIEXE in submit_file.
+  
 - Log files containing training times and metrics are copied in the logs folder on the root directory. 
