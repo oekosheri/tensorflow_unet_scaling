@@ -1,6 +1,6 @@
 #!/usr/local_rwth/bin/zsh
 
-
+# create virtual env
 python3 -m venv horovod-env
 source horovod-env/bin/activate
 

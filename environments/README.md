@@ -4,7 +4,7 @@
 
    ```bash
 
-   # for the Rocky partition
+   # for our Rocky cluster
    source ./load_env_rocky.sh
    ```
 

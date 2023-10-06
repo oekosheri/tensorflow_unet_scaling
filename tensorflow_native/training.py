@@ -29,7 +29,7 @@ class TimeHistory(tf.keras.callbacks.Callback):
     def on_epoch_end(self, batch, logs={}):
         self.times.append(time.time() - self.epoch_time_start)
 
-
+# claculates IOU metric
 def jaccard_coef(y_true, y_pred, smooth=1.0):
     y_true_f = y_true.flatten()
     y_pred_f = y_pred.flatten()
@@ -38,7 +38,7 @@ def jaccard_coef(y_true, y_pred, smooth=1.0):
         np.sum(y_true_f) + np.sum(y_pred_f) - intersection + smooth
     )
 
-
+# claculates IOU metric
 def iou_thresh(y_true, y_pred_thresholded):
 
     y_true_f = y_true.flatten()
@@ -48,7 +48,7 @@ def iou_thresh(y_true, y_pred_thresholded):
     iou_score = np.sum(intersect) / np.sum(union)
     return iou_score
 
-
+# create datasets
 def get_datasets(args, test_size=0.2):
 
     image_names = glob.glob(args.image_dir + "/*.png")
@@ -78,7 +78,7 @@ def get_datasets(args, test_size=0.2):
 
     return train_ds, val_ds
 
-
+# image reading and processing
 def process_tensor(img_path, mask_path):
 
     raw_im = tf.io.read_file(img_path)
@@ -94,7 +94,7 @@ def process_tensor(img_path, mask_path):
 
     return input_image, input_mask
 
-
+# image augmentation
 def augment(image, mask):
 
     # deterministic flip
@@ -110,7 +110,7 @@ def augment(image, mask):
 
     return image, mask
 
-
+# configuring dataset operations to the optimal performance, order of op matters
 def configure_for_performance(ds, batch_size, shuffle=False,  augmentation=False, options=True):
     if options:
         options_shard = tf.data.Options()
@@ -135,7 +135,7 @@ def configure_for_performance(ds, batch_size, shuffle=False,  augmentation=False
 
     return ds
 
-
+# testing
 def test(model, ds_test):
 
 
@@ -272,7 +272,7 @@ def main(args):
     init_lr = 0.001
     increment = ((init_lr * K) - init_lr) / 10
 
-    # designed for 150 epochs
+    # designed for 200 epochs
     def lr_schedule(epoch, lr):
 
         if epoch < 80:
