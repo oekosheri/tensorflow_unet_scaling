@@ -39,6 +39,6 @@ Training:
 
 This [notebook](./notebooks/Loss_curves.ipynb) has been used for post processing of log files. We use two metrics to judge the parallelisation performance. First, the deviation from an ideal linear speed-up which corresponds to increasing the computational cost. Second, the model metrics, here IOU, which might decrease in comparison with a 1 GPU scenario as the loss convergence might suffer in a data parallel scheme. 
 
-In the figure below we compare the GPU parallelisation of Unet for Tensorflow native and Tensorflow Horovod. For Tensorflow native the speed-up deviates rather quickly from the ideal speed-up and also the model metric (Here IOU) deteriorates at higher GPU numbers. Tensorflow Horovod seems to outperform native Tensorflow. We have repeated these calculation with different seeds and the behaviours observed here seem to be consistent.
+In the figure below we compare the scaling behavior of Unet for Tensorflow native and Tensorflow Horovod. For Tensorflow native the speed-up deviates rather quickly from the ideal speed-up and also the model metric (Here IOU) deteriorates at higher GPU numbers. Tensorflow Horovod seems to outperform native Tensorflow. We have repeated these calculation with different seeds and the behaviours observed here seem to be consistent.
 
 <img src="./image.png" width="99%" height="99%">
