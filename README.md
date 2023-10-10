@@ -18,14 +18,16 @@ Submission:
 
 Training:  
 
-- In Tensorflow native, when the jobs are run on one node, a “mirror strategy” was used and when they are run across multiple nodes a “multi worker strategy”. In Horovod Tensorflow there is no distinction between the two cases. 
+- Strategy: In Tensorflow native, when the jobs are run on one node, a “mirror strategy” was used and when they are run across multiple nodes a “multi worker strategy”. In Horovod Tensorflow there is no distinction between the two cases. 
   
 - Learning rate: A linear scaling rule is applied to the learning rate: it means the learning rate is multiplied by the number of workers (GPUs). In addition an optional initial warm-up and a gradual scheduling might help the convergence. The warm-up is commented out in our case as it didn’t provide improvement. 
   
-- Note that for parallelizing the datasets “sharding” has been added and the order of dataset operations (mapping, caching, sharding …)  matters in configuring the dataset for performance. Here we have used them in an optimal way. 
+- Datasets: Note that for parallelizing the datasets “sharding” has been added and the order of dataset operations (mapping, caching, sharding …)  matters in configuring the dataset for performance. Here we have used them in an optimal way. 
 
   
-- Model and optimisation: In Tensorflow native the model should be wrapped in the relevant strategy (mirror or multi worker). in Tensorflow horovod the optimiser is wrapped in Horovod distributed optimizer.  
+- Model and optimisation: In Tensorflow native the model should be wrapped in the relevant strategy (mirror or multi worker). in Tensorflow horovod the optimiser is wrapped in Horovod distributed optimizer.
+
+- Horovod-tensorflow/Keras requires some other minor edits to the training script that you can read [here](https://horovod.readthedocs.io/en/latest/keras.html).
 
 ### Submission
 
