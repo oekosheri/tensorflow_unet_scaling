@@ -1,4 +1,4 @@
-## GPU acceleration of Unet using Tensorflow native environment and Horovod
+## GPU acceleration of Unet using Tensorflow native environment and Horovod-tensorflow
 
 On the root directory you will find the scripts to run UNet (used for image semantic segmentation) implemented in Tensorflow using a GPU data parallel scheme in Horovod Tensorflow. In the native Tensorflow directory you will find the scripts to run the same training jobs using Tensorflow native environment without Horovod. The goal is to compare the paralleisation performance of Horovod Tensorflow vs native Tensorflow for a UNet algorithm. The data used here is an open microscopy data for semantic segmentation: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.7639190.svg)](https://doi.org/10.5281/zenodo.7639190). These calculations have all been done on the [RWTH high performance computing cluster](https://help.itc.rwth-aachen.de/), using Tesla V100 GPUs. 
 
